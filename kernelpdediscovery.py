@@ -57,7 +57,7 @@ L = 1
 Nx = 200
 dx = L / (Nx - 1)
 x = np.linspace(0, L, Nx)
-u0 = np.exp((-np.sin(np.pi * x)**2)/2)
+
 t_span = (0, 10)
 t_eval = np.linspace(0, 10, 200)
 
