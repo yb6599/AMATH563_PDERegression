@@ -1,12 +1,54 @@
 import numpy as np
 import sklearn
 import sklearn.metrics
+from sklearn.metrics import mean_squared_error
 from sklearn.metrics.pairwise import polynomial_kernel, sigmoid_kernel
 from sklearn.gaussian_process.kernels import RBF
 from scipy.linalg import solve
 import jax.numpy as jnp
 from jax import grad
 import matplotlib.pyplot as plt
+
+def add_noise(u, noise_percentage, seed=42):
+    np.random.seed(seed)
+    u_std = np.std(u)
+    noise_std = (noise_percentage / 100) * u_std
+    u_noisy = u + np.random.normal(scale=noise_std, size=u.shape)
+    return u_noisy
+
+def calculate_ut_and_s(system, x, u_smooth, derivatives):
+    X, Y = np.meshgrid(x, x)
+    s = np.column_stack([X, u_smooth, derivatives['ux'], derivatives['uxx']])
+    if system == 'Diffusion':
+        ut = -derivatives['uxx']
+    elif system == 'Burgers':
+        ut = -0.1 * derivatives['uxx'] + u_smooth * derivatives['ux']
+    elif system == 'Kuramoto-Sivashinsky':
+        s = np.column_stack([X, u_smooth, derivatives['ux'], derivatives['uxx'],
+                            derivatives['uxxx'], derivatives['uxxxx']])
+        ut = derivatives['uxx'] + derivatives['uxxxx'] + derivatives['ux'] * u_smooth
+    else:
+        raise ValueError("Invalid system specified")
+    return ut, s
+
+def find_best_parameters(u, u_noisy, x, kernel_type, param_grid):
+    mse_list = []
+    for params in param_grid:
+        u_smooth = kernel_smoothing(u_noisy, x, kernel=kernel_type, **params)
+        mse = mean_squared_error(u, u_smooth)
+        mse_list.append({**params, 'mse': mse})
+    best_params = min(mse_list, key=lambda x: x['mse'])
+    return best_params, mse_list
+
+def generate_param_grid(kernel_type):
+    if kernel_type == 'rbf':
+        return [{'l': l} for l in [0.01, 0.1, 1, 5, 10]]
+    elif kernel_type == 'poly':
+        return [{'coef0': c, 'degree': d, 'gamma': gamma} for gamma in [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1]
+                for c in [0.25, 0.5, 1, 5] for d in [1, 2, 3, 4, 5]]
+    elif kernel_type == 'sigmoid':
+        return [{'coef0': c, 'gamma': gamma} for gamma in [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1]
+                for c in [0.25, 0.5, 1, 5]]
 
 def kernel_spatial_derivatives(x1, x2, u_noisy, kernel, order=1, **kwargs):
     x1 = x1[:, None]
@@ -117,17 +159,21 @@ def kernel_smoothing(u_noisy, x, kernel: str, reg=0.1, **kwargs):
     u_smooth = U @ solve((U + reg * np.eye(Nx)), u_noisy)
     return u_smooth
 
-def plot_comparison(
-    x, t, u, u_noisy, u_smooth
-):
-    y = np.linspace(x[0], x[-1], len(x) + 1)
-    x = np.linspace(t[0], t[-1], len(t) + 1)
-    fig, axs = plt.subplots(1, 3, figsize=(18, 6))
-    axs[0].pcolormesh(x, y, u)
-    axs[0].set(title="True Data")
-    axs[1].pcolormesh(x, y, u_noisy)
-    axs[1].set(title="Noisy Data")
-    axs[2].pcolormesh(x, y, u_smooth)
-    axs[2].set(title="Smoothed Data")
-    plt.show()
-    return fig, axs
+def load_data(system):
+    if system == 'Burgers':
+        u = np.load("data/Burgers.npy")
+        x = np.linspace(-8, 8, 1000)
+        t = np.linspace(0, 16, 1000)
+    elif system == 'Diffusion':
+        u = np.load("data/Diffusion.npy")
+        x = np.linspace(-8, 8, 1000)
+        t = np.linspace(0, 16, 1000)
+    elif system == 'Kuramoto-Sivashinsky':
+        u = np.load("data/Kuramoto-Sivashinsky.npy")
+        x = np.linspace(0, 100, 1000)
+        t = np.linspace(0, 100, 1000)
+    else:
+        raise ValueError("Invalid system specified")
+    u = np.squeeze(u)
+    return u, x, t
+
