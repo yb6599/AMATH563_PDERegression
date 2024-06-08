@@ -1,14 +1,8 @@
 import numpy as np
-import sklearn
-import sklearn.metrics
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics.pairwise import polynomial_kernel, sigmoid_kernel
 from sklearn.gaussian_process.kernels import RBF
 from scipy.linalg import solve
-import jax.numpy as jnp
-from jax import grad
-import matplotlib.pyplot as plt
-
 
 def add_noise(u, noise_percentage, seed=42):
     np.random.seed(seed)
@@ -42,7 +36,7 @@ def calculate_ut_and_s(system, x, u_smooth, derivatives):
     return ut, s
 
 
-def find_best_parameters(u, u_noisy, x, kernel_type, param_grid):
+def find_best_parameters_smoothing(u, u_noisy, x, kernel_type, param_grid):
     mse_list = []
     for params in param_grid:
         u_smooth = kernel_smoothing(u_noisy, x, kernel=kernel_type, **params)
@@ -51,11 +45,19 @@ def find_best_parameters(u, u_noisy, x, kernel_type, param_grid):
     best_params = min(mse_list, key=lambda x: x["mse"])
     return best_params, mse_list
 
+def find_best_parameters_functional(u, s, S, ut, kernel_type, param_grid):
+    mse_list = []
+    for params in param_grid:
+        P = functional_form_PDE(s, S, ut, kernel=kernel_type, **params)
+        mse = mean_squared_error(u, P)
+        mse_list.append({**params, "mse": mse})
+    best_params = min(mse_list, key=lambda x: x["mse"])
+    return best_params, mse_list
 
 def generate_param_grid(kernel_type):
     if kernel_type == "rbf":
         return [{"l": l} for l in [0.01, 0.1, 1, 5, 10]]
-    elif kernel_type == "poly":
+    elif kernel_type == "polynomial":
         return [
             {"coef0": c, "degree": d, "gamma": gamma}
             for gamma in [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1]
@@ -99,7 +101,7 @@ def kernel_spatial_derivatives(x1, x2, u_noisy, kernel, order=1, **kwargs):
             rbf_derivatives["uxxxx"] = Uxxxx @ solve((U + 0.1 * np.eye(N)), u_noisy)
         return rbf_derivatives
 
-    if kernel == "poly":
+    if kernel == "polynomial":
         c = kwargs.get("coef0")
         d = kwargs.get("degree")
         g = kwargs.get("gamma")
@@ -164,7 +166,7 @@ def functional_form_PDE(s, s_test, ut, kernel: str, **kwargs):
         K = RBF(length_scale=length_scale)
         P = K(s_test, s) @ solve((K(s, s) + 0.01 * np.eye(s.shape[0])), ut)
         return P
-    if kernel == "poly":
+    if kernel == "polynomial":
         c = kwargs.get("coef0")
         d = kwargs.get("degree")
         g = kwargs.get("gamma")
@@ -188,7 +190,7 @@ def kernel_smoothing(u_noisy, x, kernel: str, reg=0.1, **kwargs):
         length_scale = kwargs.get("l")
         rbf = RBF(length_scale=length_scale)
         U = rbf(x)
-    elif kernel == "poly":
+    elif kernel == "polynomial":
         coef0 = kwargs.get("coef0")
         degree = kwargs.get("degree")
         gamma = kwargs.get("gamma")
